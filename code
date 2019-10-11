@@ -1,0 +1,128 @@
+import sys
+
+
+import numpy as np  # numpy库
+import pandas as pd  # pandas库
+from sklearn.feature_extraction import DictVectorizer  # 数值分类转整数分类库
+from imblearn.over_sampling import SMOTE  # 过抽样处理库SMOTE
+from sklearn.model_selection import StratifiedKFold, cross_val_score  # 导入交叉检验算法
+from sklearn.linear_model import LogisticRegression  # 导入逻辑回归库
+from sklearn.ensemble import VotingClassifier, RandomForestClassifier, BaggingClassifier  # 三种集成分类库和投票方法库
+
+
+
+def data_describe(data):
+    print("数据末尾数据：")
+    print(data.tail(2))
+    print("-"*40)
+    print("数据类型：")
+    print(data.dtypes)
+    print("详细信息：")
+    print(data.describe().T)
+    
+def na_summary(data):
+    na_cols=data.isnull().any(axis=0)
+    print("存在空值的列")
+    print(na_cols)
+    print("空值记录数")
+    row_na=data.isnull().any(axis=1)
+    print(row_na.sum())
+    
+    
+def label_information(data):
+    sample=data.iloc[:,-1].groupby(data.iloc[:,-1]).count()
+    print("样本标签分布")
+    print(sample)
+    
+types={'order_id':np.object,'pro_id':np.object,'use_id':object}
+row_data=pd.read_table("abnormal_orders.txt",delimiter=',',dtype=types)
+data_describe(row_data)
+na_summary(row_data)
+label_information(row_data)
+
+drop_na_set=row_data.dropna()
+
+def str2int(data,convert_object,unique_object,training=True):
+    convert_cols=['cat','attribution','pro_id','pro_brand','order_source','pay_type','use_id','city']
+    final_matrix=data[convert_cols]
+    lines=data.shape[0]
+    dict_list=[]
+    if training==True:
+        unique_list=[]
+        for col_name in convert_cols:
+            cols_unique_value=data[col_name].unique().tolist()
+            unique_list.append(cols_unique_value)
+        for line_index in range(lines):
+            each_record=final_matrix.iloc[line_index]
+            for each_index,each_data in enumerate(each_record):#循环得出每一行数据的index和数据
+                list_value=unique_list[each_index]#从unique_list中找出对应each_index值的列表
+                each_record[each_index]=list_value.index(each_data)
+            each_dict = dict(zip(convert_cols, each_record))  # 将每个值和对应的索引组合字典
+            dict_list.append(each_dict)
+        model_dvtransform=DictVectorizer(sparse=False,dtype=np.int64)#创建转换模型
+        model_dvtransform.fit(dict_list)
+        traing_part_data = model_dvtransform.transform(dict_list)  # 转换训练集
+        return model_dvtransform, unique_list, traing_part_data
+    else:
+        for line_index in range(lines):
+            each_record=final_matrix.iloc[line_index]
+            for each_index,each_data in enumerate(each_record):#循环得出每一行数据的index和数据
+                list_value=unique_list[each_index]#从unique_list中找出对应each_index值的列表
+                each_record[each_index]=list_value.index(each_data)
+            each_dict = dict(zip(convert_cols, each_record))  # 将每个值和对应的索引组合字典
+            dict_list.append(each_dict)
+        predict_part_data = convert_object.transform(dict_list)  # 转换预测集
+        return predict_part_data
+            
+
+    def datetime2int(data):
+
+    data_set=pd.to_datetime(data['order_date'])
+    data_set_time=pd.to_datetime(data['order_time'])
+    weekday_data=data_set.dt.weekday
+    day_data=data_set.dt.day
+    month_data=data_set.dt.month
+    hour_data=data_set_time.dt.hour
+    second_data=data_set_time.dt.second
+    minute_data=data_set_time.dt.minute
+    
+    data_list={'weekday':weekday_data,'month':month_data,'day':day_data,
+               'hour':hour_data,'minute':minute_data,'second':second_data}
+    df=pd.DataFrame(data_list)
+    final_matrix=df.as_matrix()
+    
+    return final_matrix
+# dd=datetime2int(drop_na_set)
+# dd.shape
+
+#样本均衡
+def sample_balance(X,y):
+    model_smote=SMOTE()
+    x_smote_resampled,y_smote_resampled=model_smote.fit_sample(X,y)
+    return x_smote_resampled, y_smote_resampled
+    
+drop_na_set=row_data.dropna()
+X_row=drop_na_set.iloc[:,1:-1]
+y_row=drop_na_set.iloc[:,-1]
+model_dvtransform,unique_object,str2int_data=str2int(X_row,None,None,training=True)
+datetime2int_data=datetime2int(X_row)
+print(datetime2int_data.shape)
+print(str2int_data.shape)
+conbine_set=np.hstack((str2int_data,datetime2int_data))
+constan_set=X_row[['total_money','total_quantity']]
+X_conbine=np.hstack((conbine_set,constan_set))
+
+X,y=sample_balance(X_conbine,y_row)#样本均衡化处理
+# y
+
+model_rf=RandomForestClassifier(n_estimators=20,random_state=0)
+model_lr=LogisticRegression(random_state=0)
+model_bagc=BaggingClassifier(n_estimators=20,random_state=0)
+estimators=[('randomforest',model_rf),('logistic',model_lr),('bagging',model_bagc)]#评估器列表
+model_vot=VotingClassifier(estimators=estimators,voting='soft',weights=[0.9,1.2,1.1],n_jobs=-1)
+cv=StratifiedKFold(8)
+cv_sorce=cross_val_score(model_vot,X,y,cv=cv)
+print('{:*^60}'.format('cross_val_score:'))
+print(cv_sorce)
+print("平均得分：%.2f"%cv_sorce.mean())
+model_vot.fit(X,y)
