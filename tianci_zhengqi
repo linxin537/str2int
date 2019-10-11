@@ -1,0 +1,111 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import StratifiedKFold,cross_val_score #数据拆分；交叉验证
+from sklearn.feature_selection import SelectPercentile,f_classif #特征选择库；
+from sklearn.pipeline import Pipeline #管道
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import AdaBoostRegressor #集成算法
+from sklearn.metrics import accuracy_score #准确率指标
+import time
+import seaborn as sns
+from sklearn.decomposition import PCA
+import warnings
+import matplotlib.pyplot as plt
+warnings.filterwarnings("ignore")
+%matplotlib notebook
+
+data=pd.read_table("zhengqi_train.txt")
+data_train=pd.read_table("zhengqi_train.txt")
+data_test=pd.read_table("zhengqi_test.txt")
+data_train["type"]='train'
+data_test["type"]='test'
+
+data_all=pd.concat([data_train,data_test],axis=0,ignore_index=True)
+data_all.head()
+
+
+for column in data_all.columns[0:-2]:
+    fig=plt.figure()
+    g = sns.kdeplot(data_all[column][(data_all["type"] == "train")], color="Red", shade = True)
+    g = sns.kdeplot(data_all[column][(data_all["type"] == "test")], ax =g, color="Blue", shade= True)
+    g.set_xlabel(column)
+    g.set_ylabel("Frequency")
+    g = g.legend(["train","test"])
+    plt.show()
+    
+threshold = 0.1
+data_train1=data_all[data_all['type']=='train'].drop('type',axis=1)
+corr_matrix = data_train1.corr().abs()
+drop_col=corr_matrix[corr_matrix["target"]<threshold].index
+data_all.drop(drop_col,axis=1,inplace=True)
+
+#data_all.drop(["V5","V9","V11","V17","V22","V28"],axis=1,inplace=True)
+data_clean_train=data_all[(data_all['type']=='train')].drop('type',axis=1)
+data_clean_test=data_all[(data_all['type']=='test')].drop('type',axis=1)
+data_clean_test.head()
+
+from sklearn.model_selection import train_test_split
+train_data,test_data=train_test_split(data_clean_train,test_size=0.2,random_state=42)
+print(test_data.shape)
+print(train_data.shape)
+test_x=test_data.iloc[:,:-1]
+test_y=test_data.iloc[:,-1]
+
+X=train_data.iloc[:,:-1]
+y=train_data.iloc[:,-1]
+
+
+#0.367813371491701 {'max_features': 3, 'n_estimators': 70}
+
+from sklearn.model_selection import GridSearchCV
+param_grid=[{
+    'n_estimators':[5,25,50,70,100,200,300],'max_features':[3,7,10,15,17,24]},
+    {'bootstrap':[False],'n_estimators':[3,7,10],'max_features':[2,3,4]}]
+forest_reg=RandomForestRegressor()
+gaid_search=GridSearchCV(forest_reg,param_grid,cv=5,scoring='neg_mean_squared_error')
+gaid_search.fit(X,y)
+final_model=gaid_search.best_estimator_
+print(gaid_search.best_params_)
+cvres=gaid_search.cv_results_
+for mean_score,params in zip(cvres['mean_test_score'],cvres['params']):
+    print(np.sqrt(-mean_score),params)
+
+#模型运用
+from sklearn.metrics import mean_squared_error
+final_predict=final_model.predict(test_x)
+final_predict_mse=mean_squared_error(test_y,final_predict)
+final_rsme=np.sqrt(final_predict_mse)
+print(final_predict_mse)
+def get_precision(y,y_predict):
+    true_predict=sum(y and y_predict for y,y_predict in zip(y,y_predict))
+    actui=sum(y)
+    return true_predict/actui
+r=get_precision(test_y,final_predict)
+print("随机森林\n")
+print(r)
+
+
+new_data = pd.read_table('zhengqi_test.txt')  # 读取要预测的数据集
+data_clean_test.drop('target',axis=1,inplace=True)
+data_clean_test.head()
+
+
+# new_X_final = transform.transform(data_clean_test)  # 对数据集做特征选择
+
+# 输出预测值以及预测概率
+predict_labels = pd.DataFrame(final_model.predict(data_clean_test), columns=['target'])  # 获得预测标签
+#predict_labels_pro = pd.DataFrame(final_model.predict_proba(new_X_final), columns=['pro1', 'pro2'])  # 获得预测概率
+predict_pd = pd.concat((new_data, predict_labels), axis=1)  # 将预测标签、预测数据和原始数据X合并
+print ('Predict info')
+print (predict_pd.head(2))  # 打印前2条结果
+print ('-' * 60)
+
+# 将预测结果写入Excel
+writer = pd.ExcelWriter('zhengqi.xlsx')  # 创建写入文件对象
+predict_pd.to_excel(writer, 'Sheet1')  # 将数据写入sheet1
+writer.save()  # 保存文件
+
+# 后续--与实际效果的比较
+
+
