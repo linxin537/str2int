@@ -74,8 +74,7 @@ def str2int(data,convert_object,unique_object,training=True):
         predict_part_data = convert_object.transform(dict_list)  # 转换预测集
         return predict_part_data
             
-
-    def datetime2int(data):
+ def datetime2int(data):
 
     data_set=pd.to_datetime(data['order_date'])
     data_set_time=pd.to_datetime(data['order_time'])
