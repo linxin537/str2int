@@ -113,7 +113,9 @@ X_conbine=np.hstack((conbine_set,constan_set))
 
 X,y=sample_balance(X_conbine,y_row)#样本均衡化处理
 # y
-def get_best_model(X, y):
+
+＃选取质量更高的特征
+def get_best_model（X，y）：
     '''
     结合交叉检验得到不同参数下的分类模型结果
     :param X: 输入X（特征变量）
