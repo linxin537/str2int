@@ -67,7 +67,7 @@ def str2int(data,convert_object,unique_object,training=True):
         for line_index in range(lines):
             each_record=final_matrix.iloc[line_index]
             for each_index,each_data in enumerate(each_record):#循环得出每一行数据的index和数据
-                list_value=unique_list[each_index]#从unique_list中找出对应each_index值的列表
+                list_value=unique_object[each_index]#从unique_list中找出对应each_index值的列表
                 each_record[each_index]=list_value.index(each_data)
             each_dict = dict(zip(convert_cols, each_record))  # 将每个值和对应的索引组合字典
             dict_list.append(each_dict)
@@ -113,6 +113,53 @@ X_conbine=np.hstack((conbine_set,constan_set))
 
 X,y=sample_balance(X_conbine,y_row)#样本均衡化处理
 # y
+def get_best_model(X, y):
+    '''
+    结合交叉检验得到不同参数下的分类模型结果
+    :param X: 输入X（特征变量）
+    :param y: 预测y（目标变量）
+    :return: 特征选择模型对象
+    '''
+    transform = SelectPercentile(f_classif, percentile=50)  # 使用f_classif方法选择特征最明显的50%数量的特征
+    model_adaboost = AdaBoostClassifier()  # 建立AdaBoostClassifier模型对象
+    model_pipe = Pipeline(steps=[('ANOVA', transform), ('model_adaboost', model_adaboost)])  # 建立由特征选择和分类模型构成的“管道”对象
+    cv = StratifiedKFold(5)  # 设置交叉检验次数
+    n_estimators = [20, 50, 80, 100]  # 设置模型参数列表
+    score_methods = ['accuracy', 'f1', 'precision', 'recall', 'roc_auc']  # 设置交叉检验指标
+    mean_list = list()  # 建立空列表用于存放不同参数方法、交叉检验评估指标的均值列表
+    std_list = list()  # 建立空列表用于存放不同参数方法、交叉检验评估指标的标准差列表
+    for parameter in n_estimators:  # 循环读出每个参数值
+        t1 = time.time()  # 记录训练开始的时间
+        score_list = list()  # 建立空列表用于存放不同交叉检验下各个评估指标的详细数据
+        print ('set parameters: %s' % parameter)  # 打印当前模型使用的参数
+        for score_method in score_methods:  # 循环读出每个交叉检验指标
+            model_pipe.set_params(model_adaboost__n_estimators=parameter)  # 通过“管道”设置分类模型参数
+            score_tmp = cross_val_score(model_pipe, X, y, scoring=score_method, cv=cv)  # 使用交叉检验计算指定指标的得分
+            score_list.append(score_tmp)  # 将交叉检验得分存储到列表
+        score_matrix = pd.DataFrame(np.array(score_list), index=score_methods)  # 将交叉检验详细数据转换为矩阵
+        score_mean = score_matrix.mean(axis=1).rename('mean')  # 计算每个评估指标的均值
+        score_std = score_matrix.std(axis=1).rename('std')  # 计算每个评估指标的标准差
+        score_pd = pd.concat([score_matrix, score_mean, score_std], axis=1)  # 将原始详细数据和均值、标准差合并
+        mean_list.append(score_mean)  # 将每个参数得到的各指标均值追加到列表
+        std_list.append(score_std)  # 将每个参数得到的各指标标准差追加到列表
+        print (score_pd.round(2))  # 打印每个参数得到的交叉检验指标数据，只保留2位小数
+        print ('-' * 60)
+        t2 = time.time()  # 计算每个参数下算法用时
+        tt = t2 - t1  # 计算时间间隔
+        print ('time: %s' % str(tt))  # 打印时间间隔
+    mean_matrix = np.array(mean_list).T  # 建立所有参数得到的交叉检验的均值矩阵
+    std_matrix = np.array(std_list).T  # 建立所有参数得到的交叉检验的标准差矩阵
+    mean_pd = pd.DataFrame(mean_matrix, index=score_methods, columns=n_estimators)  # 将均值矩阵转换为数据框
+    std_pd = pd.DataFrame(std_matrix, index=score_methods, columns=n_estimators)  # 将均值标准差转换为数据框
+    print ('Mean values for each parameter:')
+    print (mean_pd)  # 打印输出均值矩阵
+    print ('Std values for each parameter:')
+    print (std_pd)  # 打印输出标准差矩阵
+    print ('-' * 60)
+    return transform
+transform = get_best_model(X, y)  # 获得最佳分类模型参数信息
+transform.fit(X, y)  # 应用特征选择对象选择要参与建模的特征变量
+X_final = transform.transform(X)  # 获得具有显著性特征的特征变量
 
 model_rf=RandomForestClassifier(n_estimators=20,random_state=0)
 model_lr=LogisticRegression(random_state=0)
@@ -120,20 +167,25 @@ model_bagc=BaggingClassifier(n_estimators=20,random_state=0)
 estimators=[('randomforest',model_rf),('logistic',model_lr),('bagging',model_bagc)]#评估器列表
 model_vot=VotingClassifier(estimators=estimators,voting='soft',weights=[0.9,1.2,1.1],n_jobs=-1)
 cv=StratifiedKFold(8)
-cv_sorce=cross_val_score(model_vot,X,y,cv=cv)
+cv_sorce=cross_val_score(model_vot,X_final,y,cv=cv)
 print('{:*^60}'.format('cross_val_score:'))
 print(cv_sorce)
 print("平均得分：%.2f"%cv_sorce.mean())
-model_vot.fit(X,y)
+model_vot.fit(X_final,y)
 
 # 新数据集做预测
-X_raw_data = pd.read_csv('new_abnormal_orders.csv', dtype=dtypes)  # 读取要预测的数据集
+X_raw_data = pd.read_csv('new_abnormal_orders.csv', dtype=types)  # 读取要预测的数据集
 X_raw_new = X_raw_data.ix[:, 1:]  # 分割输入变量X，并丢弃订单ID列
-str2int_data_new = str2int(X_raw_new, model_dvtransform, unique_object, training=False)  # 字符串分类转整数型分类
+str2int_data_new = str2int(X_raw_new, model_dvtransform, unique_objects, training=False)  # 字符串分类转整数型分类
 datetime2int_data_new = datetime2int(X_raw_new)  # 日期时间转换
 combine_set_new = np.hstack((str2int_data_new, datetime2int_data_new))  # 合并转换后的分类和拓展后的日期数据集
 constant_set_new = X_raw_new[['total_money', 'total_quantity']]  # 原始连续数据变量
 X_combine_new = np.hstack((combine_set_new, constant_set_new))  # 再次合并数据集
+
+
+X_combine_new = transform.transform(X_combine_new)  # 获得具有显著性特征的特征变量
+
 y_predict = model_vot.predict(X_combine_new)  # 预测结果
 print ('{:*^60}'.format('Predicted Labesls:'))
 print (y_predict)  # 打印预测值
+
